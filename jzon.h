@@ -12,10 +12,22 @@ extern "C"
 {
 #endif
 
-struct JzonKeyValuePair;
-typedef struct JzonKeyValuePair JzonKeyValuePair;
+//struct JzonKeyValuePair;
+//typedef struct JzonKeyValuePair JzonKeyValuePair;
 
 typedef struct JzonValue
+{
+	bool is_string : 1;
+	bool is_int : 1;
+	bool is_float : 1;
+	bool is_object : 1;
+	bool is_array : 1;
+	bool is_bool : 1;
+	bool is_null : 1;
+} JzonValue;
+
+
+/*typedef struct JzonValue
 {
 	bool is_string;
 	bool is_int;
@@ -35,13 +47,14 @@ typedef struct JzonValue
 		struct JzonKeyValuePair** object_values;
 		struct JzonValue** array_values;
 	};
-} JzonValue;
+} JzonValue;*/
 
+/*
 struct JzonKeyValuePair {
 	char* key;
 	uint64_t key_hash;
 	JzonValue* value;
-};
+};*/
 
 typedef struct JzonParseResult {
 	bool success;
@@ -57,19 +70,18 @@ typedef struct JzonAllocator {
 } JzonAllocator;
 
 // Parse using default malloc allocator.
-JzonParseResult jzon_parse(const char* input);
+JzonValue* jzon_parse(const char* input);
 
 // Parse using custom allocator. Make sure to call jzon_free_custom_allocator using the same allocator.
-JzonParseResult jzon_parse_custom_allocator(const char* input, JzonAllocator* allocator);
-
-// Free parse result data structure using default free deallocator.
-void jzon_free(JzonValue* value);
-
-// Free parse result data structure which was parsed using custom allocator. Make sure to pass the same allocator you did to jzon_parse_custom_allocator.
-void jzon_free_custom_allocator(JzonValue* value, JzonAllocator* allocator);
+JzonValue* jzon_parse_custom_allocator(const char* input, JzonAllocator* allocator);
 
 // Find object value by key. Returns NULL if object is not an actual jzon object or there exists no value with the specified key. Uses a binary search algorithm.
-JzonValue* jzon_get(JzonValue* object, const char* key);
+//JzonValue* jzon_get(JzonValue* object, const char* key);
+
+unsigned jzon_size(JzonValue* jzon);
+char* jzon_key(JzonValue* jzon, unsigned i);
+JzonValue* jzon_value(JzonValue* jzon, unsigned i);
+char* jzon_string(JzonValue* jzon);
 
 #ifdef __cplusplus
 }

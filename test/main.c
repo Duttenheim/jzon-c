@@ -53,17 +53,18 @@ void pretty_print(int depth, JzonValue* value)
 		printf(prefix);
 		printf("{");
 		printf("\n");
-		for (i = 0; i < value->size; ++i)
+
+		for (unsigned i = 0; i < jzon_size(value); ++i)
 		{
 			printf(new_prefix);
-			printf(value->object_values[i]->key);
-			pretty_print(depth + 1, value->object_values[i]->value);
+			printf(jzon_key(value, i));
+			pretty_print(depth + 1, jzon_value(value, i));
 			printf("\n");
 		}
-		
+
 		printf(prefix);
 		printf("}");
-	}
+	}/*
 	else if (value->is_array)
 	{
 		printf("\n");
@@ -103,24 +104,24 @@ void pretty_print(int depth, JzonValue* value)
 	{
 		printf(prefix);
 		printf("null");
-	}
+	}*/
 	else if (value->is_string)
 	{
 		printf(prefix);
-		printf(value->string_value);
+		printf(jzon_string(value));
 	}
 }
 
 int main()
 {
 	LoadedFile file = load_file("test.jzon");
-	JzonParseResult result = jzon_parse(file.data);
-	assert(result.success == true);
-	pretty_print(0, result.output);
-	JzonValue* trailing_value = jzon_get(result.output, "mysterious_words_by_id");
-	assert(trailing_value != NULL);
-	(void)trailing_value;
-	jzon_free(result.output);
+	JzonValue* result = jzon_parse(file.data);
+	assert(result != NULL);
+	pretty_print(0, result);
+	//JzonValue* trailing_value = jzon_get(result.output, "mysterious_words_by_id");
+	//assert(trailing_value != NULL);
+	//(void)trailing_value;
+	//jzon_free(result.output);
 	getchar();
 	return 0;
 }
