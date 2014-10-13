@@ -80,12 +80,12 @@ void pretty_print(int depth, JzonValue* value)
 		
 		printf(prefix);
 		printf("]");
-	}/*
+	}
 	else if (value->is_bool)
 	{
 		printf(prefix);
 
-		if (value->bool_value)
+		if (jzon_bool(value))
 			printf("true");
 		else
 			printf("false");
@@ -93,18 +93,18 @@ void pretty_print(int depth, JzonValue* value)
 	else if (value->is_float)
 	{
 		printf(prefix);
-		printf("%f", value->float_value);
-	}*/
+		printf("%f", jzon_float(value));
+	}
 	else if (value->is_int)
 	{
 		printf(prefix);
 		printf("%i", jzon_int(value));
-	}/*
+	}
 	else if (value->is_null)
 	{
 		printf(prefix);
 		printf("null");
-	}*/
+	}
 	else if (value->is_string)
 	{
 		printf(prefix);
@@ -118,6 +118,7 @@ int main()
 	JzonValue* result = jzon_parse(file.data);
 	assert(result != NULL);
 	pretty_print(0, result);
+	free(result);
 	//JzonValue* trailing_value = jzon_get(result.output, "mysterious_words_by_id");
 	//assert(trailing_value != NULL);
 	//(void)trailing_value;
