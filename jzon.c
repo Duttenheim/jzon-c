@@ -403,55 +403,6 @@ int parse_object(const char** input, OutputBuffer* output, bool root_object, Jzo
 	return 0;
 }
 
-int parse_word(const char** input, OutputBuffer* output, JzonAllocator* allocator)
-{
-	char* start = (char*)*input;
-	char* end = start;
-
-	while (current(input))
-	{
-		if ((current(input) >= 'A' && current(input) <= 'Z') || (current(input) >= 'a' && current(input) <= 'z'))
-			++end;
-		else
-		{
-			if ((unsigned)(end - start) == 4 && memcmp(start, "true", 4) == 0)
-			{
-				JzonValue* header = (JzonValue*)output->write_head;
-				memset(header, 0, sizeof(JzonValue));
-				header->is_bool = true;
-				advance(output, sizeof(JzonValue), allocator);
-				bool value = true;
-				write(output, &value, sizeof(bool), allocator);
-				return 0;
-			}
-			else if ((unsigned)(end - start) == 5 && memcmp(start, "false", 5) == 0)
-			{
-				JzonValue* header = (JzonValue*)output->write_head;
-				memset(header, 0, sizeof(JzonValue));
-				header->is_bool = true;
-				advance(output, sizeof(JzonValue), allocator);
-				bool value = false;
-				write(output, &value, sizeof(bool), allocator);
-				return 0;
-			}
-			else if ((unsigned)(end - start) == 4 && memcmp(start, "null", 4) == 0)
-			{
-				JzonValue* header = (JzonValue*)output->write_head;
-				memset(header, 0, sizeof(JzonValue));
-				header->is_null = true;
-				advance(output, sizeof(JzonValue), allocator);
-				return 0;
-			}
-
-			break;
-		}
-
-		next(input);
-	}
-
-	return -1;
-}
-
 int parse_number(const char** input, OutputBuffer* output, JzonAllocator* allocator)
 {
 	{
@@ -526,6 +477,55 @@ int parse_number(const char** input, OutputBuffer* output, JzonAllocator* alloca
 	}
 
 	return 0;
+}
+
+int parse_word(const char** input, OutputBuffer* output, JzonAllocator* allocator)
+{
+	char* start = (char*)*input;
+	char* end = start;
+
+	while (current(input))
+	{
+		if ((current(input) >= 'A' && current(input) <= 'Z') || (current(input) >= 'a' && current(input) <= 'z'))
+			++end;
+		else
+		{
+			if ((unsigned)(end - start) == 4 && memcmp(start, "true", 4) == 0)
+			{
+				JzonValue* header = (JzonValue*)output->write_head;
+				memset(header, 0, sizeof(JzonValue));
+				header->is_bool = true;
+				advance(output, sizeof(JzonValue), allocator);
+				bool value = true;
+				write(output, &value, sizeof(bool), allocator);
+				return 0;
+			}
+			else if ((unsigned)(end - start) == 5 && memcmp(start, "false", 5) == 0)
+			{
+				JzonValue* header = (JzonValue*)output->write_head;
+				memset(header, 0, sizeof(JzonValue));
+				header->is_bool = true;
+				advance(output, sizeof(JzonValue), allocator);
+				bool value = false;
+				write(output, &value, sizeof(bool), allocator);
+				return 0;
+			}
+			else if ((unsigned)(end - start) == 4 && memcmp(start, "null", 4) == 0)
+			{
+				JzonValue* header = (JzonValue*)output->write_head;
+				memset(header, 0, sizeof(JzonValue));
+				header->is_null = true;
+				advance(output, sizeof(JzonValue), allocator);
+				return 0;
+			}
+
+			break;
+		}
+
+		next(input);
+	}
+
+	return -1;
 }
 
 int parse_value(const char** input, OutputBuffer* output, JzonAllocator* allocator)
