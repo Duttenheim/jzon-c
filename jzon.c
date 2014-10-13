@@ -139,6 +139,12 @@ uint64_t hash_str(const char* str, size_t len)
 }
 
 
+uint64_t hash_str_lookup_len(const char* str)
+{
+	return hash_str(str, strlen(str));
+}
+
+
 // OutputBuffer
 
 typedef struct OutputBuffer {
@@ -166,9 +172,33 @@ void write(OutputBuffer* output, void* data, unsigned size, JzonAllocator* alloc
 	output->write_head += size;
 }
 
+
+void advance(OutputBuffer* output, unsigned len, JzonAllocator* allocator)
+{
+	unsigned write_head_offset = output->write_head - output->data;
+
+	if (write_head_offset + len > output->size)
+	{
+		unsigned new_size = output->size * 2 + len;
+		char* new_data = allocator->allocate(new_size);
+		memcpy(new_data, output->data, output->size);
+		allocator->deallocate(output->data);
+		output->data = new_data;
+		output->write_head = output->data + write_head_offset;
+		output->size = new_size;
+	}
+
+	output->write_head += len;
+}
+
 unsigned current_write_offset(OutputBuffer* output)
 {
 	return output->write_head - output->data;
+}
+
+unsigned offset_from_offset(OutputBuffer* output, unsigned offset)
+{
+	return current_write_offset(output) - offset;
 }
 
 // Jzon implmenetation
@@ -185,7 +215,7 @@ __forceinline char current(const char** input)
 
 bool is_multiline_string_quotes(const char* str)
 {
-	return *str == '"' && *(str + 1) == '"' && *(str + 1) == '"';
+	return *str != '\0' && *str == '"' && *(str + 1) != '\0' && *(str + 1) == '"' && *(str + 2) != '\0' &&  *(str + 2) == '"';
 }
 
 /*
@@ -221,49 +251,61 @@ void skip_whitespace(const char** input)
 	}
 };
 
-char* parse_multiline_string(const char** input, JzonAllocator* allocator)
+uint64_t parse_multiline_string(const char** input, OutputBuffer* output, JzonAllocator* allocator)
 {
 	if (!is_multiline_string_quotes(*input))
-		return NULL;
+		return -1;
 	
 	*input += 3;
-	String str = { 0 };
+	unsigned output_start_offset = current_write_offset(output);
+	char* end = *input;
+	char* row_start = *input;
 
 	while (current(input))
 	{
-		if (current(input) == '\n' || current(input) == '\r')
-		{
-			skip_whitespace(input);
+		if (current(input) == '\n' || current(input) == '\r') {
+			unsigned str_len = end - row_start;
 
-			if (str.size > 0)
-				str_add(&str, '\n', allocator);
+			if (str_len != 0)
+			{
+				write(output, row_start, str_len, allocator);
+				char line_break = '\n';
+				write(output, &line_break, sizeof(char), allocator);
+			}
+
+			skip_whitespace(input);
+			row_start = *input;
+			end = *input;
 		}
 
 		if (is_multiline_string_quotes(*input))
 		{
 			*input += 3;
-			return str.str;
+			break;
 		}
 
-		str_add(&str, current(input), allocator);
+		++end;
 		next(input);
 	}
 
-	allocator->deallocate(str.str);
-	return NULL;
+
+	unsigned str_len = current_write_offset(output) - output_start_offset;
+	char termination = '\0';
+	write(output, &termination, sizeof(char), allocator);
+	return hash_str((char*)(output->data + output_start_offset), str_len);
 }
 
-char* parse_string_internal(char** input, OutputBuffer* output, JzonAllocator* allocator)
+uint64_t parse_string_internal(const char** input, OutputBuffer* output, JzonAllocator* allocator)
 {
 	if (current(input) != '"')
-		return NULL;
+		return (uint64_t)-1;
 
-	/*if (is_multiline_string_quotes(*input))
-		return parse_multiline_string(input, allocator);*/
+	if (is_multiline_string_quotes(*input))
+		return parse_multiline_string(input, output, allocator);
 
 	next(input);
 
-	char* start = *input;
+	char* start = (char*)*input;
 	char* end = start;
 
 	while (current(input))
@@ -282,6 +324,7 @@ char* parse_string_internal(char** input, OutputBuffer* output, JzonAllocator* a
 	write(output, start, str_len, allocator);
 	char termination = '\0';
 	write(output, &termination, sizeof(char), allocator);
+	return hash_str(start, str_len);
 }
 
 uint64_t parse_keyname(const char** input, OutputBuffer* output, JzonAllocator* allocator)
@@ -289,7 +332,7 @@ uint64_t parse_keyname(const char** input, OutputBuffer* output, JzonAllocator* 
 	if (current(input) == '"')
 		return parse_string_internal(input, output, allocator);
 		
-	char* start = *input;
+	char* start = (char*)*input;
 	char* end = start;
 
 	while (current(input))
@@ -306,7 +349,6 @@ uint64_t parse_keyname(const char** input, OutputBuffer* output, JzonAllocator* 
 	write(output, start, key_len, allocator);
 	char termination = '\0';
 	write(output, &termination, sizeof(char), allocator);
-
 	return hash_str(start, key_len);
 }
 
@@ -314,11 +356,13 @@ int parse_value(const char** input, OutputBuffer* output, JzonAllocator* allocat
 
 int parse_string(const char** input, OutputBuffer* output, JzonAllocator* allocator)
 {
-	JzonValue* header = (JzonValue*)output->write_head;
-	memset(header, 0, sizeof(JzonValue));
-	header->is_string = true;
-	output->write_head += sizeof(JzonValue);
+	{
+		JzonValue* header = (JzonValue*)output->write_head;
+		memset(header, 0, sizeof(JzonValue));
+		header->is_string = true;
+	}
 
+	advance(output, sizeof(JzonValue), allocator);
 	parse_string_internal(input, output, allocator);
 	return 0;
 }
@@ -328,18 +372,22 @@ int parse_array(const char** input, OutputBuffer* output, JzonAllocator* allocat
 	if (current(input) != '[')
 		return -1;
 	
-	JzonValue* header = (JzonValue*)output->write_head;
-	memset(header, 0, sizeof(JzonValue));
-	header->is_array = true;
-	output->write_head += sizeof(JzonValue);
+	{
+		JzonValue* header = (JzonValue*)output->write_head;
+		memset(header, 0, sizeof(JzonValue));
+		header->is_array = true;
+	}
+
+	unsigned header_offset = current_write_offset(output);
+	advance(output, sizeof(JzonValue), allocator);
 	unsigned offset_table_offset_write_pos = current_write_offset(output);
-	output->write_head += sizeof(unsigned);
+	advance(output, sizeof(unsigned), allocator);
 	next(input);
 
 	// Empty array.
 	if (current(input) == ']')
 	{
-		*(unsigned*)(output->data + offset_table_offset_write_pos) = current_write_offset(output);
+		*(unsigned*)(output->data + offset_table_offset_write_pos) = offset_from_offset(output, header_offset);
 		unsigned size = 0;
 		write(output, &size, sizeof(size), allocator);
 		return 0;
@@ -354,13 +402,12 @@ int parse_array(const char** input, OutputBuffer* output, JzonAllocator* allocat
 	while (current(input))
 	{
 		skip_whitespace(input);
-		char* value_pos = output->write_head;
+		unsigned value_offset = offset_from_offset(output, header_offset);
 		int error = parse_value(input, output, allocator);
 
 		if (error != 0)
 			return error;
 
-		unsigned value_offset = (unsigned)(value_pos - header);
 		write(&offset_table, &value_offset, sizeof(unsigned), allocator);
 		++(*(unsigned*)offset_table.data);
 		skip_whitespace(input);
@@ -372,7 +419,7 @@ int parse_array(const char** input, OutputBuffer* output, JzonAllocator* allocat
 		}
 	}
 
-	*(unsigned*)(output->data + offset_table_offset_write_pos) = (unsigned)(output->write_head - header);
+	*(unsigned*)(output->data + offset_table_offset_write_pos) = offset_from_offset(output, header_offset);
 	write(output, offset_table.data, (unsigned)(offset_table.write_head - offset_table.data), allocator);
 	allocator->deallocate(offset_table.data);
 	return 0;
@@ -385,17 +432,22 @@ int parse_object(const char** input, OutputBuffer* output, bool root_object, Jzo
 	else if (!root_object)
 		return -1;
 
-	JzonValue* header = (JzonValue*)output->write_head;
-	memset(header, 0, sizeof(JzonValue));
-	header->is_object = true;
-	output->write_head += sizeof(JzonValue);
+	{
+		JzonValue* header = (JzonValue*)output->write_head;
+		memset(header, 0, sizeof(JzonValue));
+		header->is_object = true;
+	}
+
+	unsigned header_offset = current_write_offset(output);
+	advance(output, sizeof(JzonValue), allocator);
 	unsigned offset_table_offset_write_pos = current_write_offset(output);
-	output->write_head += sizeof(unsigned);
+	advance(output, sizeof(unsigned), allocator);
+	skip_whitespace(input);
 	
 	// Empty object.
 	if (current(input) == '}')
 	{
-		*(unsigned*)(output->data + offset_table_offset_write_pos) = current_write_offset(output);
+		*(unsigned*)(output->data + offset_table_offset_write_pos) = offset_from_offset(output, header_offset);
 		unsigned size = 0;
 		write(output, &size, sizeof(size), allocator);
 		return 0;
@@ -410,7 +462,7 @@ int parse_object(const char** input, OutputBuffer* output, bool root_object, Jzo
 	while (current(input))
 	{
 		skip_whitespace(input);
-		char* key_pos = output->write_head;
+		unsigned key_offset = offset_from_offset(output, header_offset);
 		uint64_t key_hash = parse_keyname(input, output, allocator);
 		skip_whitespace(input);
 		
@@ -418,16 +470,14 @@ int parse_object(const char** input, OutputBuffer* output, bool root_object, Jzo
 			return -1;
 
 		next(input);
-		char* value_pos = output->write_head;
+		unsigned value_offset = offset_from_offset(output, header_offset);
 		int error = parse_value(input, output, allocator);
 
 		if (error != 0)
 			return error;
 
 		write(&offset_table, &key_hash, sizeof(uint64_t), allocator);
-		unsigned key_offset = (unsigned)(key_pos - header);
 		write(&offset_table, &key_offset, sizeof(unsigned), allocator);
-		unsigned value_offset = (unsigned)(value_pos - header);
 		write(&offset_table, &value_offset, sizeof(unsigned), allocator);
 		++(*(unsigned*)offset_table.data);
 
@@ -440,7 +490,7 @@ int parse_object(const char** input, OutputBuffer* output, bool root_object, Jzo
 		}
 	}
 	
-	*(unsigned*)(output->data + offset_table_offset_write_pos) = (unsigned)(output->write_head - header);
+	*(unsigned*)(output->data + offset_table_offset_write_pos) = offset_from_offset(output, header_offset);
 	write(output, offset_table.data, (unsigned)(offset_table.write_head - offset_table.data), allocator);
 	allocator->deallocate(offset_table.data);
 
@@ -450,12 +500,16 @@ int parse_object(const char** input, OutputBuffer* output, bool root_object, Jzo
 
 int parse_number(const char** input, OutputBuffer* output, JzonAllocator* allocator)
 {
-	JzonValue* header = (JzonValue*)output->write_head;
-	memset(header, 0, sizeof(JzonValue));
+	{
+		JzonValue* header = (JzonValue*)output->write_head;
+		memset(header, 0, sizeof(JzonValue));
+	}
+	
+	unsigned header_offset = current_write_offset(output);
 	bool is_float = false;
-	output->write_head += sizeof(JzonValue);
 
-	char* start = *input;
+	advance(output, sizeof(JzonValue), allocator);
+	char* start = (char*)*input;
 	char* end = start;
 	
 	if (current(input) == '-')
@@ -504,67 +558,20 @@ int parse_number(const char** input, OutputBuffer* output, JzonAllocator* alloca
 
 	if (is_float)
 	{
+		JzonValue* header = (JzonValue*)(output->data + header_offset);
 		header->is_float = true;
 		float value = (float)strtod(start, &end);
 		write(output, &value, sizeof(float), allocator);
 	}
 	else
 	{
+		JzonValue* header = (JzonValue*)(output->data + header_offset);
 		header->is_int = true;
 		int value = (int)strtol(start, &end, 10);
 		write(output, &value, sizeof(int), allocator);
 	}
 
 	return 0;
-}
-
-int parse_word_or_string(const char** input, JzonValue* output, JzonAllocator* allocator)
-{/*
-	String str = {0};
-
-	while (current(input))
-	{
-		if (current(input) == '\r' || current(input) == '\n')
-		{
-			if (str.size == 4 && str_equals(&str, "true"))
-			{
-				output->is_bool = true;
-				output->bool_value = true;
-				allocator->deallocate(str.str);
-				return 0;
-			}
-			else if (str.size == 5 && str_equals(&str, "false"))
-			{
-				output->is_bool = true;
-				output->bool_value = false;
-				allocator->deallocate(str.str);
-				return 0;
-			}
-			else if (str.size == 4 && str_equals(&str, "null"))
-			{
-				output->is_null = true;
-				allocator->deallocate(str.str);
-				return 0;
-			}
-			else
-			{
-				output->is_string = true;
-				output->string_value = str.str;
-				return 0;
-			}
-
-			break;
-		}		
-		else
-			str_add(&str, current(input), allocator);
-
-		next(input);
-	}
-
-	allocator->deallocate(str.str);
-	return -1;*/
-
-	return -1;
 }
 
 int parse_value(const char** input, OutputBuffer* output, JzonAllocator* allocator)
@@ -577,11 +584,9 @@ int parse_value(const char** input, OutputBuffer* output, JzonAllocator* allocat
 		case '{': return parse_object(input, output, false, allocator);
 		case '[': return parse_array(input, output, allocator);
 		case '"': return parse_string(input, output, allocator);
-		//case '-': return parse_number(input, output, allocator);
-		default: return ch >= '0' && ch <= '9' ? parse_number(input, output, allocator) : parse_word_or_string(input, output, allocator);
+		case '-': return parse_number(input, output, allocator);
+		default: return ch >= '0' && ch <= '9' ? parse_number(input, output, allocator) : -1;
 	}
-
-	return -1;
 }
 
 
@@ -630,7 +635,8 @@ unsigned jzon_size(JzonValue* jzon)
 
 char* jzon_key(JzonValue* jzon, unsigned i)
 {
-	return (char*)(((char*)jzon) + ((OffsetTableEntry*)(lookup_table_start(jzon) + sizeof(unsigned)))[i].key_offset);
+	OffsetTableEntry* table = ((OffsetTableEntry*)(lookup_table_start(jzon) + sizeof(unsigned)));
+	return (char*)(((char*)jzon) + table[i].key_offset);
 }
 
 JzonValue* jzon_value(JzonValue* jzon, unsigned i)

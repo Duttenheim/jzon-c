@@ -70,6 +70,7 @@ void pretty_print(int depth, JzonValue* value)
 		printf(prefix);
 		printf("[");
 		printf("\n");
+
 		for (unsigned i = 0; i < jzon_size(value); ++i)
 		{
 			printf(new_prefix);
