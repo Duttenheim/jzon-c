@@ -39,8 +39,7 @@ LoadedFile load_file(const char *filename)
 void pretty_print(int depth, JzonValue* value)
 {
 	char prefix[100];
-	char new_prefix[100];	
-	unsigned i = 0;
+	char new_prefix[100];
 
 	memset(prefix, ' ', depth * 2);
 	prefix[depth * 2] = '\0';
@@ -64,23 +63,23 @@ void pretty_print(int depth, JzonValue* value)
 
 		printf(prefix);
 		printf("}");
-	}/*
+	}
 	else if (value->is_array)
 	{
 		printf("\n");
 		printf(prefix);
 		printf("[");
 		printf("\n");
-		for (i = 0; i < value->size; ++i)
+		for (unsigned i = 0; i < jzon_size(value); ++i)
 		{
 			printf(new_prefix);
-			pretty_print(depth + 1, value->array_values[i]);
+			pretty_print(depth + 1, jzon_value(value, i));
 			printf("\n");
 		}
 		
 		printf(prefix);
 		printf("]");
-	}
+	}/*
 	else if (value->is_bool)
 	{
 		printf(prefix);
@@ -94,12 +93,12 @@ void pretty_print(int depth, JzonValue* value)
 	{
 		printf(prefix);
 		printf("%f", value->float_value);
-	}
+	}*/
 	else if (value->is_int)
 	{
 		printf(prefix);
-		printf("%i", value->int_value);
-	}
+		printf("%i", jzon_int(value));
+	}/*
 	else if (value->is_null)
 	{
 		printf(prefix);

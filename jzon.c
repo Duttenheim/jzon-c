@@ -323,35 +323,46 @@ int parse_string(const char** input, OutputBuffer* output, JzonAllocator* alloca
 	return 0;
 }
 
-/*
-int parse_array(const char** input, JzonValue* output, JzonAllocator* allocator)
+int parse_array(const char** input, OutputBuffer* output, JzonAllocator* allocator)
 {	
 	if (current(input) != '[')
 		return -1;
 	
-	output->is_array = true;
+	JzonValue* header = (JzonValue*)output->write_head;
+	memset(header, 0, sizeof(JzonValue));
+	header->is_array = true;
+	output->write_head += sizeof(JzonValue);
+	unsigned offset_table_offset_write_pos = current_write_offset(output);
+	output->write_head += sizeof(unsigned);
 	next(input);
 
 	// Empty array.
 	if (current(input) == ']')
 	{
-		output->size = 0; 
+		*(unsigned*)(output->data + offset_table_offset_write_pos) = current_write_offset(output);
+		unsigned size = 0;
+		write(output, &size, sizeof(size), allocator);
 		return 0;
 	}
 
-	Array array_values = { 0 };
-
+	OutputBuffer offset_table;
+	offset_table.data = allocator->allocate(4);
+	offset_table.size = 4;
+	offset_table.write_head = offset_table.data + sizeof(unsigned);
+	*(unsigned*)offset_table.data = 0;
+	
 	while (current(input))
 	{
 		skip_whitespace(input);
-		JzonValue* value = (JzonValue*)allocator->allocate(sizeof(JzonValue));
-		memset(value, 0, sizeof(JzonValue));
-		int error = parse_value(input, value, allocator);
+		char* value_pos = output->write_head;
+		int error = parse_value(input, output, allocator);
 
 		if (error != 0)
 			return error;
 
-		arr_add(&array_values, value, allocator);
+		unsigned value_offset = (unsigned)(value_pos - header);
+		write(&offset_table, &value_offset, sizeof(unsigned), allocator);
+		++(*(unsigned*)offset_table.data);
 		skip_whitespace(input);
 
 		if (current(input) == ']')
@@ -360,11 +371,12 @@ int parse_array(const char** input, JzonValue* output, JzonAllocator* allocator)
 			break;
 		}
 	}
-	
-	output->size = array_values.size; 
-	output->array_values = (JzonValue**)array_values.arr;	
+
+	*(unsigned*)(output->data + offset_table_offset_write_pos) = (unsigned)(output->write_head - header);
+	write(output, offset_table.data, (unsigned)(offset_table.write_head - offset_table.data), allocator);
+	allocator->deallocate(offset_table.data);
 	return 0;
-}*/
+}
 
 int parse_object(const char** input, OutputBuffer* output, bool root_object, JzonAllocator* allocator)
 {
@@ -413,9 +425,9 @@ int parse_object(const char** input, OutputBuffer* output, bool root_object, Jzo
 			return error;
 
 		write(&offset_table, &key_hash, sizeof(uint64_t), allocator);
-		unsigned key_offset = (unsigned)(key_pos - output->data);
+		unsigned key_offset = (unsigned)(key_pos - header);
 		write(&offset_table, &key_offset, sizeof(unsigned), allocator);
-		unsigned value_offset = (unsigned)(value_pos - output->data);
+		unsigned value_offset = (unsigned)(value_pos - header);
 		write(&offset_table, &value_offset, sizeof(unsigned), allocator);
 		++(*(unsigned*)offset_table.data);
 
@@ -428,40 +440,45 @@ int parse_object(const char** input, OutputBuffer* output, bool root_object, Jzo
 		}
 	}
 	
-	*(unsigned*)(output->data + offset_table_offset_write_pos) = (unsigned)(output->write_head - output->data);
+	*(unsigned*)(output->data + offset_table_offset_write_pos) = (unsigned)(output->write_head - header);
 	write(output, offset_table.data, (unsigned)(offset_table.write_head - offset_table.data), allocator);
 	allocator->deallocate(offset_table.data);
 
 	return 0;
 }
 
-/*
-int parse_number(const char** input, JzonValue* output, JzonAllocator* allocator)
-{
-	String num = {0};
-	bool is_float = false;
 
+int parse_number(const char** input, OutputBuffer* output, JzonAllocator* allocator)
+{
+	JzonValue* header = (JzonValue*)output->write_head;
+	memset(header, 0, sizeof(JzonValue));
+	bool is_float = false;
+	output->write_head += sizeof(JzonValue);
+
+	char* start = *input;
+	char* end = start;
+	
 	if (current(input) == '-')
 	{
-		str_add(&num, current(input), allocator);
+		++end;
 		next(input);
 	}
 
 	while (current(input) >= '0' && current(input) <= '9')
 	{
-		str_add(&num, current(input), allocator);
+		++end;
 		next(input);
 	}
 
 	if (current(input) == '.')
 	{
 		is_float = true;
-		str_add(&num, current(input), allocator);
+		++end;
 		next(input);
 
 		while (current(input) >= '0' && current(input) <= '9')
 		{
-			str_add(&num, current(input), allocator);
+			++end;
 			next(input);
 		}
 	}
@@ -469,39 +486,40 @@ int parse_number(const char** input, JzonValue* output, JzonAllocator* allocator
 	if (current(input) == 'e' || current(input) == 'E')
 	{
 		is_float = true;
-		str_add(&num, current(input), allocator);
+		++end;
 		next(input);
 
 		if (current(input) == '-' || current(input) == '+')
 		{
-			str_add(&num, current(input), allocator);
+			++end;
 			next(input);
 		}
 
 		while (current(input) >= '0' && current(input) <= '9')
 		{
-			str_add(&num, current(input), allocator);
+			++end;
 			next(input);
 		}
 	}
 
 	if (is_float)
 	{
-		output->is_float = true;
-		output->float_value = (float)strtod(num.str, NULL);
+		header->is_float = true;
+		float value = (float)strtod(start, &end);
+		write(output, &value, sizeof(float), allocator);
 	}
 	else
 	{
-		output->is_int = true;
-		output->int_value = (int)strtol(num.str, NULL, 10);
+		header->is_int = true;
+		int value = (int)strtol(start, &end, 10);
+		write(output, &value, sizeof(int), allocator);
 	}
 
-	allocator->deallocate(num.str);
 	return 0;
 }
 
 int parse_word_or_string(const char** input, JzonValue* output, JzonAllocator* allocator)
-{
+{/*
 	String str = {0};
 
 	while (current(input))
@@ -544,8 +562,10 @@ int parse_word_or_string(const char** input, JzonValue* output, JzonAllocator* a
 	}
 
 	allocator->deallocate(str.str);
+	return -1;*/
+
 	return -1;
-}*/
+}
 
 int parse_value(const char** input, OutputBuffer* output, JzonAllocator* allocator)
 {
@@ -555,10 +575,10 @@ int parse_value(const char** input, OutputBuffer* output, JzonAllocator* allocat
 	switch (ch)
 	{
 		case '{': return parse_object(input, output, false, allocator);
-		//case '[': return parse_array(input, output, allocator);
+		case '[': return parse_array(input, output, allocator);
 		case '"': return parse_string(input, output, allocator);
 		//case '-': return parse_number(input, output, allocator);
-		//default: return ch >= '0' && ch <= '9' ? parse_number(input, output, allocator) : parse_word_or_string(input, output, allocator);
+		default: return ch >= '0' && ch <= '9' ? parse_number(input, output, allocator) : parse_word_or_string(input, output, allocator);
 	}
 
 	return -1;
@@ -595,27 +615,41 @@ typedef struct OffsetTableEntry {
 	unsigned value_offset;
 } OffsetTableEntry;
 
-char* object_table_start(JzonValue* jzon)
+char* lookup_table_start(JzonValue* jzon)
 {
 	return (((char*)jzon) + *(unsigned*)(jzon + 1));
 }
 
 unsigned jzon_size(JzonValue* jzon)
 {
-	if (jzon->is_object)
-		return *(unsigned*)object_table_start(jzon);
+	if (jzon->is_object || jzon->is_array)
+		return *(unsigned*)lookup_table_start(jzon);
 
 	return 0;
 }
 
 char* jzon_key(JzonValue* jzon, unsigned i)
 {
-	return (char*)(((char*)jzon) + ((OffsetTableEntry*)(object_table_start(jzon) + sizeof(unsigned)))[i].key_offset);
+	return (char*)(((char*)jzon) + ((OffsetTableEntry*)(lookup_table_start(jzon) + sizeof(unsigned)))[i].key_offset);
 }
 
 JzonValue* jzon_value(JzonValue* jzon, unsigned i)
 {
-	return (JzonValue*)(((char*)jzon) + ((OffsetTableEntry*)(object_table_start(jzon) + sizeof(unsigned)))[i].value_offset);
+	if (jzon->is_object)
+		return (JzonValue*)(((char*)jzon) + ((OffsetTableEntry*)(lookup_table_start(jzon) + sizeof(unsigned)))[i].value_offset);
+
+	if (jzon->is_array) {
+		unsigned* arr = ((unsigned*)(lookup_table_start(jzon) + sizeof(unsigned)));
+		unsigned array_offset = arr[i];
+		return (JzonValue*)(((char*)jzon) + array_offset);
+		}
+
+	return NULL;
+}
+
+int jzon_int(JzonValue* jzon)
+{
+	return *(int*)(jzon + 1);
 }
 
 char* jzon_string(JzonValue* jzon)
