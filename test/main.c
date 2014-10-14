@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/timeb.h> 
 
 typedef struct LoadedFile
 {
@@ -115,12 +116,13 @@ void pretty_print(int depth, JzonValue* value)
 int main()
 {
 	LoadedFile file = load_file("test.jzon");
+	struct timeb start, end;
+	ftime(&start);
 	JzonValue* result = jzon_parse(file.data);
+	ftime(&end);
+	unsigned elapsed = end.time - start.time;
 	assert(result != NULL);
-	pretty_print(0, result);
-	JzonValue* trailing_value = jzon_value(result, "something");
-	pretty_print(0, trailing_value);
-	assert(trailing_value != NULL);
+	//pretty_print(0, result);
 	free(result);
 	//(void)trailing_value;
 	//jzon_free(result.output);
