@@ -42,7 +42,8 @@ JzonValue* jzon_parse_custom_allocator(const char* input, JzonAllocator* allocat
 
 unsigned jzon_size(JzonValue* jzon);
 char* jzon_key(JzonValue* jzon, unsigned i);
-JzonValue* jzon_value(JzonValue* jzon, unsigned i);
+JzonValue* jzon_get(JzonValue* jzon, unsigned i);
+JzonValue* jzon_value(JzonValue* jzon, const char* key);
 int jzon_int(JzonValue* jzon);
 float jzon_float(JzonValue* jzon);
 char* jzon_string(JzonValue* jzon);

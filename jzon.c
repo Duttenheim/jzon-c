@@ -125,21 +125,6 @@ bool is_multiline_string_quotes(const char* str)
 	return *str != '\0' && *str == '"' && *(str + 1) != '\0' && *(str + 1) == '"' && *(str + 2) != '\0' &&  *(str + 2) == '"';
 }
 
-/*
-int find_object_pair_insertion_index(JzonKeyValuePair** objects, unsigned size, uint64_t key_hash)
-{
-	if (size == 0)
-		return 0;
-
-	for (unsigned i = 0; i < size; ++i)
-	{
-		if (objects[i]->key_hash > key_hash)
-			return i;
-	}
-
-	return size;
-}*/
-
 void skip_whitespace(const char** input)
 {
 	while (current(input))
@@ -332,6 +317,35 @@ int parse_array(const char** input, OutputBuffer* output, JzonAllocator* allocat
 	return 0;
 }
 
+typedef struct OffsetTableEntry {
+	uint64_t key_hash;
+	unsigned key_offset;
+	unsigned value_offset;
+} OffsetTableEntry;
+
+int find_object_pair_insertion_index(OffsetTableEntry* objects, unsigned size, uint64_t key_hash)
+{
+	if (size == 0)
+		return 0;
+
+	for (unsigned i = 0; i < size; ++i)
+	{
+		if (objects[i].key_hash > key_hash)
+			return i;
+	}
+
+	return size;
+}
+
+void move_forward_entries_at(OutputBuffer* output, unsigned size, unsigned insertion_point, JzonAllocator* allocator)
+{
+	if (output->write_head - output->data + sizeof(OffsetTableEntry) > output->size)
+		grow(output, sizeof(OffsetTableEntry), allocator);
+
+	OffsetTableEntry* objects = (OffsetTableEntry*)(output->data + sizeof(unsigned));
+	memmove(objects + insertion_point + 1, objects + insertion_point, (size - insertion_point) * sizeof(OffsetTableEntry));
+}
+
 int parse_object(const char** input, OutputBuffer* output, bool root_object, JzonAllocator* allocator)
 {
 	if (current(input) == '{')
@@ -382,10 +396,15 @@ int parse_object(const char** input, OutputBuffer* output, bool root_object, Jzo
 
 		if (error != 0)
 			return error;
-
-		write(&offset_table, &key_hash, sizeof(uint64_t), allocator);
-		write(&offset_table, &key_offset, sizeof(unsigned), allocator);
-		write(&offset_table, &value_offset, sizeof(unsigned), allocator);
+			
+		unsigned table_size = *(unsigned*)offset_table.data;
+		unsigned insertion_point = find_object_pair_insertion_index((OffsetTableEntry*)(offset_table.data + sizeof(unsigned)), table_size, key_hash);
+		move_forward_entries_at(&offset_table, table_size, insertion_point, allocator);
+		OffsetTableEntry* entry = ((OffsetTableEntry*)(offset_table.data + sizeof(unsigned)) + insertion_point);
+		entry->key_hash = key_hash;
+		entry->key_offset = key_offset;
+		entry->value_offset = value_offset;
+		advance(&offset_table, sizeof(OffsetTableEntry), allocator);
 		++(*(unsigned*)offset_table.data);
 
 		skip_whitespace(input);
@@ -571,12 +590,6 @@ JzonValue* jzon_parse(const char* input)
 	return jzon_parse_custom_allocator(input, &allocator);
 }
 
-typedef struct OffsetTableEntry {
-	uint64_t key_hash;
-	unsigned key_offset;
-	unsigned value_offset;
-} OffsetTableEntry;
-
 char* lookup_table_start(JzonValue* jzon)
 {
 	return (((char*)jzon) + *(unsigned*)(jzon + 1));
@@ -595,7 +608,7 @@ char* jzon_key(JzonValue* jzon, unsigned i)
 	return (char*)(((char*)jzon) + ((OffsetTableEntry*)(lookup_table_start(jzon) + sizeof(unsigned)))[i].key_offset);
 }
 
-JzonValue* jzon_value(JzonValue* jzon, unsigned i)
+JzonValue* jzon_get(JzonValue* jzon, unsigned i)
 {
 	if (jzon->is_object)
 		return (JzonValue*)(((char*)jzon) + ((OffsetTableEntry*)(lookup_table_start(jzon) + sizeof(unsigned)))[i].value_offset);
@@ -626,26 +639,30 @@ char* jzon_string(JzonValue* jzon)
 	return (char*)(jzon + 1);
 }
 
-/*JzonValue* jzon_get(JzonValue* object, const char* key)
+JzonValue* jzon_value(JzonValue* jzon, const char* key)
 {
-	if (!object->is_object)
+	if (!jzon->is_object)
 		return NULL;
 
-	if (object->size == 0)
+	char* table_start = lookup_table_start(jzon);
+	unsigned size = *(unsigned*)table_start;
+
+	if (size == 0)
 		return NULL;
 	
-	uint64_t key_hash = hash_str(key);
+	uint64_t key_hash = hash_str(key, strlen(key));
+	OffsetTableEntry* offset_table = (OffsetTableEntry*)(table_start + sizeof(unsigned));
 
 	unsigned first = 0;
-	unsigned last = object->size - 1;
+	unsigned last = size - 1;
 	unsigned middle = (first + last) / 2;
 
 	while (first <= last)
 	{
-		if (object->object_values[middle]->key_hash < key_hash)
+		if (offset_table[middle].key_hash < key_hash)
 			first = middle + 1;
-		else if (object->object_values[middle]->key_hash == key_hash)
-			return object->object_values[middle]->value;
+		else if (offset_table[middle].key_hash == key_hash)
+			return (JzonValue*)((char*)jzon + offset_table[middle].value_offset);
 		else
 			last = middle - 1;
 
@@ -653,4 +670,4 @@ char* jzon_string(JzonValue* jzon)
 	}
 
 	return NULL;
-}*/
+}

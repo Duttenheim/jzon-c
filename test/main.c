@@ -57,7 +57,7 @@ void pretty_print(int depth, JzonValue* value)
 		{
 			printf(new_prefix);
 			printf(jzon_key(value, i));
-			pretty_print(depth + 1, jzon_value(value, i));
+			pretty_print(depth + 1, jzon_get(value, i));
 			printf("\n");
 		}
 
@@ -74,7 +74,7 @@ void pretty_print(int depth, JzonValue* value)
 		for (unsigned i = 0; i < jzon_size(value); ++i)
 		{
 			printf(new_prefix);
-			pretty_print(depth + 1, jzon_value(value, i));
+			pretty_print(depth + 1, jzon_get(value, i));
 			printf("\n");
 		}
 		
@@ -118,9 +118,10 @@ int main()
 	JzonValue* result = jzon_parse(file.data);
 	assert(result != NULL);
 	pretty_print(0, result);
+	JzonValue* trailing_value = jzon_value(result, "something");
+	pretty_print(0, trailing_value);
+	assert(trailing_value != NULL);
 	free(result);
-	//JzonValue* trailing_value = jzon_get(result.output, "mysterious_words_by_id");
-	//assert(trailing_value != NULL);
 	//(void)trailing_value;
 	//jzon_free(result.output);
 	getchar();
