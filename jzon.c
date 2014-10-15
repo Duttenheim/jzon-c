@@ -196,6 +196,7 @@ uint64_t parse_string_internal(const char** input, OutputBuffer* output, JzonAll
 	next(input);
 
 	char* start = (char*)*input;
+	char* end = start;
 
 	while (current(input))
 	{
@@ -226,10 +227,11 @@ uint64_t parse_string_internal(const char** input, OutputBuffer* output, JzonAll
 
 				write(output, (char*)&charcode, sizeof(char), allocator);
 				start = (char*)*input;
+				end = start;
 			}
 			else
 			{
-				char* before_this_char = *input - 1;
+				char* before_this_char = (char*)*input - 1;
 
 				if (before_this_char > start)
 				{
@@ -240,13 +242,15 @@ uint64_t parse_string_internal(const char** input, OutputBuffer* output, JzonAll
 				char c = current(input);
 				write(output, &c, sizeof(char), allocator);
 				start = (char*)*input;
+				end = start;
 			}
 		}
 
+		++end;
 		next(input);
 	}
 
-	unsigned str_len = (unsigned)(*input - start);
+	unsigned str_len = (unsigned)(end - start);
 	write(output, start, str_len, allocator);
 	char termination = '\0';
 	write(output, &termination, sizeof(char), allocator);
