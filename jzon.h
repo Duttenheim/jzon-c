@@ -26,15 +26,14 @@ typedef struct JzonValue
 	bool is_null : 1;
 	unsigned size;
 
-	union
-	{
-		char* string_value;
-		int int_value;
-		bool bool_value;
-		float float_value;
-		struct JzonKeyValuePair** object_values;
-		struct JzonValue** array_values;
-	};
+	char* string_value;
+	int int_value;
+	bool bool_value;
+	float float_value;
+	char* key;
+
+	struct JzonKeyValuePair** object_values;
+	struct JzonValue** array_values;
 } JzonValue;
 
 struct JzonKeyValuePair {
@@ -45,6 +44,7 @@ struct JzonKeyValuePair {
 
 typedef struct JzonParseResult {
 	bool success;
+	const char* error;
 	JzonValue* output;
 } JzonParseResult;
 

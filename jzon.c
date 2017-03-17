@@ -302,6 +302,7 @@ int parse_array(const char** input, JzonValue* output, JzonAllocator* allocator)
 	// Empty array.
 	if (current(input) == ']')
 	{
+		next(input);
 		output->size = 0; 
 		return 0;
 	}
@@ -350,7 +351,7 @@ next(input);
 		}
 
 		Array object_values = { 0 };
-
+		Array array_values = { 0 };
 		while (current(input))
 		{
 			JzonKeyValuePair* pair = (JzonKeyValuePair*)allocator->allocate(sizeof(JzonKeyValuePair));
@@ -364,6 +365,7 @@ next(input);
 			next(input);
 			JzonValue* value = (JzonValue*)allocator->allocate(sizeof(JzonValue));
 			memset(value, 0, sizeof(JzonValue));
+			value->key = key;
 			int error = parse_value(input, value, allocator);
 
 			if (error != 0)
@@ -372,6 +374,7 @@ next(input);
 			pair->key = key;
 			pair->key_hash = hash_str(key);
 			pair->value = value;
+			arr_add(&array_values, value, allocator);
 			arr_insert(&object_values, pair, find_object_pair_insertion_index((JzonKeyValuePair**)object_values.arr, object_values.size, pair->key_hash), allocator);
 			skip_whitespace(input);
 
@@ -384,6 +387,7 @@ next(input);
 
 		output->size = object_values.size;
 		output->object_values = (JzonKeyValuePair**)object_values.arr;
+		output->array_values = (JzonValue**)array_values.arr;
 		return 0;
 }
 
@@ -423,11 +427,13 @@ int parse_number(const char** input, JzonValue* output)
 	{
 		output->is_float = true;
 		output->float_value = (float)strtod(start, NULL);
+		output->int_value = (int)output->float_value;
 	}
 	else
 	{
 		output->is_int = true;
 		output->int_value = (int)strtol(start, NULL, 10);
+		output->float_value = (float)output->int_value;
 	}
 
 	return 0;
@@ -437,6 +443,7 @@ int parse_true(const char** input, JzonValue* output)
 {
 	if (**input == 't' && *((*input) + 1) == 'r' && *((*input) + 2) == 'u' && *((*input) + 3) == 'e')
 	{
+		next(input); next(input); next(input); next(input);
 		output->is_bool = true;
 		output->bool_value = true;
 		return 0;
@@ -449,6 +456,7 @@ int parse_false(const char** input, JzonValue* output)
 {
 	if (**input == 'f' && *((*input) + 1) == 'a' && *((*input) + 2) == 'l' && *((*input) + 3) == 's' && *((*input) + 4) == 'e')
 	{
+		next(input); next(input); next(input); next(input); next(input);
 		output->is_bool = true;
 		output->bool_value = false;
 		return 0;
@@ -461,6 +469,7 @@ int parse_null(const char** input, JzonValue* output)
 {
 	if (**input == 'n' && *((*input) + 1) == 'u' && *((*input) + 2) == 'l' && *((*input) + 3) == 'l')
 	{
+		next(input); next(input); next(input); next(input); 
 		output->is_null = true;
 		return 0;
 	}
@@ -496,6 +505,7 @@ JzonParseResult jzon_parse_custom_allocator(const char* input, JzonAllocator* al
 	int error = parse_object(&input, output, true, allocator);
 	JzonParseResult result = {0};
 	result.output = output;
+	result.error = input;
 	result.success = error == 0;
 	return result;
 }
@@ -549,9 +559,9 @@ JzonValue* jzon_get(JzonValue* object, const char* key)
 	
 	uint64_t key_hash = hash_str(key);
 
-	unsigned first = 0;
-	unsigned last = object->size - 1;
-	unsigned middle = (first + last) / 2;
+	int first = 0;
+	int last = object->size - 1;
+	int middle = (first + last) / 2;
 
 	while (first <= last)
 	{
